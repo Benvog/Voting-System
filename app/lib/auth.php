@@ -138,6 +138,22 @@ function login_voter(int $voterId, string $voterUid): void
   $_SESSION['voter_uid'] = $voterUid;
 }
 
+/* The signed-in voter's row, read once per request. */
+function current_voter(): ?array
+{
+  static $voter = false;
+  if ($voter !== false) {
+    return $voter;
+  }
+  $voter = null;
+  if (!empty($_SESSION['voter_id'])) {
+    $stmt = db()->prepare("SELECT id, voter_uid, full_name, is_active FROM voters WHERE id = :id LIMIT 1");
+    $stmt->execute([':id' => (int)$_SESSION['voter_id']]);
+    $voter = $stmt->fetch() ?: null;
+  }
+  return $voter;
+}
+
 function require_voter_active(PDO $pdo): void
 {
   if (empty($_SESSION['voter_id'])) {
@@ -145,9 +161,7 @@ function require_voter_active(PDO $pdo): void
     exit;
   }
 
-  $stmt = $pdo->prepare("SELECT is_active FROM voters WHERE id = :id LIMIT 1");
-  $stmt->execute([':id' => (int)$_SESSION['voter_id']]);
-  $row = $stmt->fetch();
+  $row = current_voter();
 
   if (!$row || (int)$row['is_active'] !== 1) {
     $_SESSION = [];

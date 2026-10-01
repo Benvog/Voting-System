@@ -554,3 +554,4 @@ h2, h3 { font-weight: 600; letter-spacing: -.015em; }
 .input-reveal .input { padding-right: 44px; }
 .reveal-btn { position: absolute; right: 2px; top: 50%; translate: 0 -50%; }
 .reveal-btn[aria-pressed="true"] { color: var(--accent-ink); }
+.voter-chip:hover { background: none; }
