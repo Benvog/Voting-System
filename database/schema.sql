@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 
 CREATE TABLE IF NOT EXISTS voters (
   id            INT          NOT NULL AUTO_INCREMENT,
-  voter_uid     VARCHAR(20)  NOT NULL,
+  voter_uid     VARCHAR(40)  NOT NULL,   -- e.g. a registration number
   full_name     VARCHAR(120) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   is_active     TINYINT(1)   NOT NULL DEFAULT 1,

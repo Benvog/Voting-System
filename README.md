@@ -1,13 +1,13 @@
 # VoteMS
 
-A web app for running small elections online, such as a student council. Admins set up an election with its positions and candidates and register voters. Each voter logs in with a generated voter ID and PIN and casts one vote per position. Results, including turnout over time, are public while voting is open and after it closes.
+A web app for running small elections online, such as a student council. Admins set up an election with its positions and candidates and register voters. Each voter logs in with an ID they already have, such as their registration number, plus a PIN, and casts one vote per position. Results, including turnout over time, are public while voting is open and after it closes.
 
 Plain PHP 8 and MySQL/MariaDB, with no framework and no build step.
 
 ## Features
 
 **Voters**
-- One login page for everyone. A voter ID (`VOT-1A2B3C`) logs you in as a voter; a username logs you in as an admin.
+- One login page for everyone. A registration number (`CS/MK/0700/09/23`) logs you in as a voter; a username logs you in as an admin. Case and spaces don't matter.
 - A step-by-step ballot that works well on a phone: one position per screen, an option to skip and come back later, and a review screen before submitting.
 - The whole ballot is saved in one database transaction, so it is recorded completely or not at all.
 - A countdown to closing time, and a receipt showing what you voted for.
@@ -16,7 +16,7 @@ Plain PHP 8 and MySQL/MariaDB, with no framework and no build step.
 - An overview of turnout, votes cast and a readiness checklist (positions without candidates, no voters, no closing time).
 - One page per election for its positions and candidates, with reordering. Once anyone has voted the ballot locks, so a removed candidate can't take votes with it.
 - Only one election can be open at a time, and an election can't be opened while a position has no candidates.
-- Add voters in bulk by pasting one name per line. Login details are shown once, with a CSV download. Admins can reset PINs, disable voters and search the list.
+- Add voters in bulk by pasting `Reg no, Full name` lines, or two columns copied from a spreadsheet. Mistakes are reported by line number before anything is saved; voters already registered are skipped. Each new voter gets a PIN, shown once with a CSV download. Admins can reset PINs, disable voters and search the list.
 - Account settings for changing the admin's username and password.
 
 **Results**
@@ -28,7 +28,8 @@ Plain PHP 8 and MySQL/MariaDB, with no framework and no build step.
 - Prepared statements for every query; all output escaped.
 - CSRF tokens on every form; post/redirect/get, so a refresh never re-submits.
 - PINs and passwords hashed with `password_hash`. Login responses take the same time whether or not the account exists.
-- Login throttling: 5 failed attempts lock a voter ID or username for 15 minutes.
+- Login throttling: 5 failed attempts lock a registration number or username for 15 minutes.
+- A voter's ID can never equal an admin username, so the shared login box can't pick the wrong account.
 - The session is regenerated on login, and one browser can't be logged in as an admin and a voter at once.
 - A voter's active status is re-checked on every request, so disabling them takes effect immediately.
 - A unique key on `(election, position, voter)` makes double voting impossible, even with two requests at the same moment.
@@ -41,6 +42,7 @@ Plain PHP 8 and MySQL/MariaDB, with no framework and no build step.
    mysql -u root -e "CREATE DATABASE voting_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
    mysql -u root voting_db < database/schema.sql
    ```
+   Upgrading an older copy? Run `mysql -u root voting_db < database/migrate.sql` instead.
 3. Create an admin (you'll be asked for a password):
    ```
    php database/create_admin.php your-username
@@ -77,11 +79,11 @@ and run `php database/seed_demo.php`. Demo logins:
 | Role  | Login | Password / PIN |
 |-------|-------|----------------|
 | Admin | `demo-admin` | `demo-admin-pass` |
-| Voter | `VOT-DE0001` or `VOT-DE0002` | `246810` |
+| Voter | `CS/MK/0001/09/23` or `CS/MK/0002/09/23` | `246810` |
 
 ## Configuration
 
-Defaults are in `app/config/config.php`. To override them on a server, copy `app/config/config.local.example.php` to `app/config/config.local.php` and set only what differs (database credentials, timezone). That file is git-ignored. The timezone is applied to both PHP and MySQL so election windows behave the same on any host.
+Defaults are in `app/config/config.php`, including what voters log in with (`voters.id_label`, an example, and the allowed pattern), so a school that uses admission numbers can relabel it. To override them on a server, copy `app/config/config.local.example.php` to `app/config/config.local.php` and set only what differs (database credentials, timezone). That file is git-ignored. The timezone is applied to both PHP and MySQL so election windows behave the same on any host.
 
 ## Project structure
 

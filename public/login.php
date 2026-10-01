@@ -20,20 +20,20 @@ if (is_post()) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $error = 'Your session expired. Please try again.';
     } elseif ($identifier === '' || $secret === '') {
-        $error = 'Enter your voter ID or username, and your PIN or password.';
-    } elseif (login_is_throttled($pdo, $identifier)) {
+        $error = 'Enter your ' . strtolower(voter_id_label()) . ' or username, and your PIN or password.';
+    } elseif (login_is_throttled($pdo, $key = substr(normalize_voter_uid($identifier), 0, 50))) {
         $error = 'Too many failed attempts. Wait ' . LOGIN_WINDOW_MINUTES . ' minutes and try again.';
     } else {
-        // The shape of the ID decides which table to check, so a voter ID and
-        // an admin username can never collide.
-        if (is_voter_uid($identifier)) {
-            $stmt = $pdo->prepare("SELECT id, voter_uid, password_hash, is_active FROM voters WHERE voter_uid = :uid LIMIT 1");
-            $stmt->execute([':uid' => strtoupper($identifier)]);
-        } else {
+        // Voters first, then admins. A voter ID and an admin username are never
+        // allowed to be equal, so the order can't pick the wrong account.
+        $stmt = $pdo->prepare("SELECT id, voter_uid, password_hash, is_active FROM voters WHERE voter_uid = :uid LIMIT 1");
+        $stmt->execute([':uid' => normalize_voter_uid($identifier)]);
+        $account = $stmt->fetch();
+        if (!$account) {
             $stmt = $pdo->prepare("SELECT id, password_hash, is_active FROM admins WHERE username = :u LIMIT 1");
             $stmt->execute([':u' => $identifier]);
+            $account = $stmt->fetch();
         }
-        $account = $stmt->fetch();
 
         // Hash something even when the account doesn't exist, so response time
         // doesn't reveal which IDs are real.
@@ -41,7 +41,7 @@ if (is_post()) {
         $valid = password_verify($secret, $hash) && $account && (int)$account['is_active'] === 1;
 
         if ($valid) {
-            clear_login_failures($pdo, $identifier);
+            clear_login_failures($pdo, $key);
             if (isset($account['voter_uid'])) {
                 login_voter((int)$account['id'], (string)$account['voter_uid']);
                 redirect('/voter/dashboard.php');
@@ -50,7 +50,7 @@ if (is_post()) {
             redirect('/admin/dashboard.php');
         }
 
-        record_login_failure($pdo, $identifier);
+        record_login_failure($pdo, $key);
         $error = 'Those details don\'t match an active account.';
     }
 }
@@ -77,7 +77,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
   <div class="card">
     <div class="card-body">
       <h1>Log in</h1>
-      <p class="lead">Voters use the voter ID and PIN they were given. Administrators use their username and password.</p>
+      <p class="lead">Voters use their <?php echo e(strtolower(voter_id_label())); ?> and the PIN they were given. Administrators use their username and password.</p>
 
       <?php if ($error): ?>
         <div class="alert alert-error" role="alert"><?php echo icon('alert'); ?><span><?php echo e($error); ?></span></div>
@@ -86,8 +86,8 @@ require_once __DIR__ . '/../app/views/partials/header.php';
       <form method="post" novalidate>
         <?php echo csrf_field(); ?>
         <div class="field">
-          <label class="label" for="identifier">Voter ID or username</label>
-          <input class="input" type="text" id="identifier" name="identifier" required autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="VOT-1A2B3C" value="<?php echo e($identifier); ?>" <?php echo $identifier === '' ? 'autofocus' : ''; ?>>
+          <label class="label" for="identifier"><?php echo e(voter_id_label()); ?> or username</label>
+          <input class="input" type="text" id="identifier" name="identifier" required autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="<?php echo e(config()['voters']['id_example']); ?>" value="<?php echo e($identifier); ?>" <?php echo $identifier === '' ? 'autofocus' : ''; ?>>
         </div>
         <div class="field">
           <label class="label" for="secret">PIN or password</label>

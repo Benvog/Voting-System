@@ -26,7 +26,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
 <section class="hero">
   <div>
     <h1>Vote online, once per position.</h1>
-    <p class="lead">Log in with the voter ID and PIN you were given, choose a candidate for each position, and confirm your ballot in one step.</p>
+    <p class="lead">Log in with your <?php echo e(strtolower(voter_id_label())); ?> and PIN, choose a candidate for each position, and confirm your ballot in one step.</p>
     <div class="cta">
       <a class="btn btn-primary btn-lg" href="<?php echo e(home_for_session() ?? '/login.php'); ?>"><?php echo home_for_session() ? 'Open dashboard' : 'Log in to vote'; ?><?php echo icon('arrow-right'); ?></a>
       <a class="btn btn-ghost btn-lg" href="/results.php"><?php echo icon('chart'); ?>See results</a>

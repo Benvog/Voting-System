@@ -49,8 +49,12 @@ for ($i = 0; $i < 140; $i++) {
         $name = $first[mt_rand(0, count($first) - 1)] . ' ' . $last[mt_rand(0, count($last) - 1)];
     } while (isset($used[$name]));
     $used[$name] = true;
-    // The first three are the demo logins: fixed, easy-to-type IDs.
-    $uid = $i < 3 ? sprintf('VOT-DE%04d', $i + 1) : 'VOT-' . strtoupper(bin2hex(random_bytes(3)));
+    // Registration numbers: course / campus / number / intake month / year.
+    // The first three (CS/MK/0001/09/23 ...) are the demo logins.
+    $course = $i < 3 ? 'CS' : ['CS', 'IT', 'ED', 'BA', 'EN'][mt_rand(0, 4)];
+    $intake = $i < 3 ? 9 : [1, 5, 9][mt_rand(0, 2)];
+    $year   = $i < 3 ? 23 : mt_rand(22, 25);
+    $uid    = sprintf('%s/MK/%04d/%02d/%d', $course, $i + 1, $intake, $year);
     $insertVoter->execute([
         ':u' => $uid,
         ':n' => $name,
@@ -173,4 +177,4 @@ election($pdo, 'Hostel Committee 2027', 'draft', null, null, [
 $votes = (int)$pdo->query("SELECT COUNT(*) FROM votes")->fetchColumn();
 echo "Seeded '$dbName': " . count($voterIds) . " voters, 3 elections, $votes votes.\n";
 echo "Admin login: demo-admin / demo-admin-pass\n";
-echo "Voter logins: VOT-DE0001 or VOT-DE0002, PIN 246810 (both still to vote)\n";
+echo "Voter logins: CS/MK/0001/09/23 or CS/MK/0002/09/23, PIN 246810 (both still to vote)\n";

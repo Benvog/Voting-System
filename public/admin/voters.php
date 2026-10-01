@@ -10,14 +10,41 @@ $pdo = db();
 const PER_PAGE  = 25;
 const BULK_MAX  = 200;
 
-function generate_voter_uid(PDO $pdo): string
+/**
+ * Reads pasted "Reg no, Full name" lines. Tabs (copied from Excel), commas
+ * and semicolons all work, and either column may come first. Returns
+ * [rows, errors] where errors are "Line N: problem" strings.
+ */
+function parse_voter_lines(string $text): array
 {
-    $check = $pdo->prepare("SELECT 1 FROM voters WHERE voter_uid = :uid");
-    do {
-        $uid = 'VOT-' . strtoupper(bin2hex(random_bytes(3)));
-        $check->execute([':uid' => $uid]);
-    } while ($check->fetchColumn());
-    return $uid;
+    $rows = [];
+    $errors = [];
+    $seen = [];
+    foreach (preg_split('/\R/', $text) as $i => $line) {
+        $n = $i + 1;
+        if (trim($line) === '') continue;
+        $parts = array_values(array_filter(array_map('trim', preg_split('/\t|,|;/', $line, 2)), 'strlen'));
+        if (count($parts) < 2) {
+            $errors[] = "Line $n: needs a " . strtolower(voter_id_label()) . ' and a name, separated by a comma or tab.';
+            continue;
+        }
+        [$a, $b] = $parts;
+        // Whichever side looks like an ID (it has digits, names don't) is the ID.
+        [$uid, $name] = preg_match('/\d/', $a) || !preg_match('/\d/', $b) ? [$a, $b] : [$b, $a];
+        $uid = normalize_voter_uid($uid);
+        if ($n === 1 && !preg_match('/\d/', $uid)) continue; // a header row like "Reg no, Name"
+        if (!valid_voter_uid($uid)) {
+            $errors[] = "Line $n: \"$uid\" doesn't look like a " . strtolower(voter_id_label()) . '.';
+        } elseif (mb_strlen($name) > 120) {
+            $errors[] = "Line $n: the name is longer than 120 characters.";
+        } elseif (isset($seen[$uid])) {
+            $errors[] = "Line $n: $uid is already on line {$seen[$uid]}.";
+        } else {
+            $seen[$uid] = $n;
+            $rows[] = ['uid' => $uid, 'name' => preg_replace('/\s+/', ' ', $name)];
+        }
+    }
+    return [$rows, $errors];
 }
 
 function generate_pin(): string
@@ -41,30 +68,45 @@ if (is_post()) {
     $action = (string)($_POST['action'] ?? '');
 
     if ($action === 'create') {
-        // One name per line; blank lines ignored.
-        $names = array_values(array_filter(array_map('trim', preg_split('/\R/', (string)($_POST['names'] ?? '')))));
-        $names = array_map(fn($n) => mb_substr($n, 0, 120), $names);
+        $text = (string)($_POST['voters'] ?? '');
+        [$rows, $errors] = parse_voter_lines($text);
 
-        if (!$names) {
-            flash('error', 'Enter at least one name.');
-        } elseif (count($names) > BULK_MAX) {
-            flash('error', 'Add at most ' . BULK_MAX . ' voters at a time.');
-        } else {
-            $insert = $pdo->prepare("INSERT INTO voters (voter_uid, full_name, password_hash, is_active) VALUES (:u, :n, :h, 1)");
-            $created = [];
-            $pdo->beginTransaction();
-            foreach ($names as $name) {
-                $uid = generate_voter_uid($pdo);
-                $pin = generate_pin();
-                $insert->execute([':u' => $uid, ':n' => $name, ':h' => password_hash($pin, PASSWORD_DEFAULT)]);
-                $created[] = ['name' => $name, 'uid' => $uid, 'pin' => $pin];
-            }
-            $pdo->commit();
-            // Shown once on the next page view, then forgotten.
-            $_SESSION['new_credentials'] = $created;
-            flash('success', 'Registered ' . plural(count($created), 'voter') . '. Share their login details below; PINs are not shown again.');
+        if (!$rows && !$errors) {
+            $errors[] = 'Paste at least one line: ' . strtolower(voter_id_label()) . ', then the full name.';
+        } elseif (count($rows) > BULK_MAX) {
+            $errors[] = 'Add at most ' . BULK_MAX . ' voters at a time.';
         }
-        redirect('/admin/voters.php');
+
+        if ($errors) {
+            // Nothing is created until every line is fixed; keep what was pasted.
+            $_SESSION['import'] = ['text' => $text, 'errors' => $errors];
+            redirect('/admin/voters.php#add');
+        }
+
+        $insert  = $pdo->prepare("INSERT INTO voters (voter_uid, full_name, password_hash, is_active) VALUES (:u, :n, :h, 1)");
+        $created = [];
+        $skipped = [];
+        $pdo->beginTransaction();
+        foreach ($rows as $row) {
+            if ($owner = identifier_owner($pdo, $row['uid'])) {
+                $skipped[] = $row['uid'] . ($owner === 'admin' ? ' (an admin username)' : '');
+                continue;
+            }
+            $pin = generate_pin();
+            $insert->execute([':u' => $row['uid'], ':n' => $row['name'], ':h' => password_hash($pin, PASSWORD_DEFAULT)]);
+            $created[] = ['name' => $row['name'], 'uid' => $row['uid'], 'pin' => $pin];
+        }
+        $pdo->commit();
+
+        // Shown once on the next page view, then forgotten.
+        $_SESSION['new_credentials'] = $created;
+        if ($created) {
+            flash('success', 'Registered ' . plural(count($created), 'voter') . '. Share their PINs below; they are not shown again.');
+        }
+        if ($skipped) {
+            flash('info', 'Skipped ' . plural(count($skipped), 'line') . ' already in use: ' . implode(', ', array_slice($skipped, 0, 8)) . (count($skipped) > 8 ? ' and ' . (count($skipped) - 8) . ' more' : '') . '.');
+        }
+        redirect('/admin/voters.php' . ($created ? '#new-logins' : '#main'));
     }
 
     $voterId = (int)($_POST['voter_id'] ?? 0);
@@ -81,6 +123,7 @@ if (is_post()) {
         $pdo->prepare("DELETE FROM login_attempts WHERE identifier = :u")->execute([':u' => $voter['voter_uid']]);
         $_SESSION['new_credentials'] = [['name' => $voter['full_name'], 'uid' => $voter['voter_uid'], 'pin' => $pin]];
         flash('success', "New PIN created for {$voter['full_name']}. The old one no longer works.");
+        redirect(back_to_list() . '#new-logins');
     } elseif ($action === 'toggle_active') {
         $active = (int)$voter['is_active'] === 1 ? 0 : 1;
         $pdo->prepare("UPDATE voters SET is_active = :a WHERE id = :id")->execute([':a' => $active, ':id' => $voterId]);
@@ -128,7 +171,9 @@ $voters = $list->fetchAll();
 $counts = $pdo->query("SELECT COUNT(*) AS total, COALESCE(SUM(is_active = 1), 0) AS active FROM voters")->fetch();
 
 $newCredentials = $_SESSION['new_credentials'] ?? [];
-unset($_SESSION['new_credentials']);
+$import         = $_SESSION['import'] ?? null; // a pasted list that had errors
+unset($_SESSION['new_credentials'], $_SESSION['import']);
+$idLabel = voter_id_label();
 
 function page_url(int $page): string
 {
@@ -146,7 +191,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
 <div class="page-head">
   <div>
     <h1>Voters</h1>
-    <p><?php echo number_format((int)$counts['active']); ?> can vote · <?php echo number_format((int)$counts['total'] - (int)$counts['active']); ?> disabled. Every voter logs in with a generated voter ID and a 6-digit PIN.</p>
+    <p><?php echo number_format((int)$counts['active']); ?> can vote · <?php echo number_format((int)$counts['total'] - (int)$counts['active']); ?> disabled. Voters log in with their <?php echo e(strtolower($idLabel)); ?> and a 6-digit PIN.</p>
   </div>
   <div class="actions">
     <a class="btn btn-primary" href="#add"><?php echo icon('plus'); ?>Add voters</a>
@@ -154,7 +199,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
 </div>
 
 <?php if ($newCredentials): ?>
-  <section class="card creds" aria-labelledby="creds-title">
+  <section class="card creds" id="new-logins" aria-labelledby="creds-title">
     <div class="card-head">
       <div>
         <h2 id="creds-title"><?php echo icon('key'); ?><span class="sr-only">New </span>Login details</h2>
@@ -168,17 +213,17 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
       <div class="card-body">
         <p class="muted small"><?php echo e($c['name']); ?></p>
         <dl class="creds-grid">
-          <div class="cred"><div><dt>Voter ID</dt><dd><?php echo e($c['uid']); ?></dd></div><button class="icon-btn" type="button" data-copy="<?php echo e($c['uid']); ?>" aria-label="Copy voter ID"><?php echo icon('copy'); ?></button></div>
+          <div class="cred"><div><dt><?php echo e($idLabel); ?></dt><dd><?php echo e($c['uid']); ?></dd></div><button class="icon-btn" type="button" data-copy="<?php echo e($c['uid']); ?>" aria-label="Copy <?php echo e(strtolower($idLabel)); ?>"><?php echo icon('copy'); ?></button></div>
           <div class="cred"><div><dt>PIN</dt><dd><?php echo e($c['pin']); ?></dd></div><button class="icon-btn" type="button" data-copy="<?php echo e($c['pin']); ?>" aria-label="Copy PIN"><?php echo icon('copy'); ?></button></div>
         </dl>
       </div>
     <?php else: ?>
       <div class="table-wrap">
         <table class="table" id="creds-table">
-          <thead><tr><th>Name</th><th>Voter ID</th><th>PIN</th></tr></thead>
+          <thead><tr><th><?php echo e($idLabel); ?></th><th>Name</th><th>PIN</th></tr></thead>
           <tbody>
             <?php foreach ($newCredentials as $c): ?>
-              <tr><td><?php echo e($c['name']); ?></td><td class="mono"><?php echo e($c['uid']); ?></td><td class="mono"><?php echo e($c['pin']); ?></td></tr>
+              <tr><td class="mono"><?php echo e($c['uid']); ?></td><td><?php echo e($c['name']); ?></td><td class="mono"><?php echo e($c['pin']); ?></td></tr>
             <?php endforeach; ?>
           </tbody>
         </table>
@@ -194,7 +239,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
       <div class="field grow input-icon">
         <label class="sr-only" for="q">Search voters</label>
         <?php echo icon('search'); ?>
-        <input class="input" id="q" name="q" value="<?php echo e($q); ?>" placeholder="Search by name or voter ID">
+        <input class="input" id="q" name="q" value="<?php echo e($q); ?>" placeholder="Search by name or <?php echo e(strtolower($idLabel)); ?>">
       </div>
       <div class="field fit">
         <label class="sr-only" for="status">Status</label>
@@ -277,16 +322,29 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
   <div class="card-head">
     <div>
       <h2 id="add-title">Add voters</h2>
-      <div class="sub">One full name per line, up to <?php echo BULK_MAX; ?> at a time. Each gets a voter ID and PIN.</div>
+      <div class="sub">One voter per line: <?php echo e(strtolower($idLabel)); ?>, then full name. Up to <?php echo BULK_MAX; ?> at a time. Each voter gets a PIN.</div>
     </div>
   </div>
   <div class="card-body">
+    <?php if ($import): ?>
+      <div class="alert alert-error" role="alert">
+        <?php echo icon('alert'); ?>
+        <div>
+          <strong>Nothing was added yet.</strong> Fix <?php echo count($import['errors']) === 1 ? 'this line' : 'these lines'; ?> and submit again:
+          <ul class="error-list">
+            <?php foreach (array_slice($import['errors'], 0, 15) as $err): ?><li><?php echo e($err); ?></li><?php endforeach; ?>
+            <?php if (count($import['errors']) > 15): ?><li>…and <?php echo count($import['errors']) - 15; ?> more.</li><?php endif; ?>
+          </ul>
+        </div>
+      </div>
+    <?php endif; ?>
     <form method="post">
       <?php echo csrf_field(); ?>
       <input type="hidden" name="action" value="create">
       <div class="field">
-        <label class="label" for="names">Names</label>
-        <textarea class="textarea" id="names" name="names" rows="4" required placeholder="Jane Wanjiru&#10;Peter Otieno"></textarea>
+        <label class="label" for="voters-input">Voters</label>
+        <textarea class="textarea mono" id="voters-input" name="voters" rows="5" required placeholder="<?php echo e(config()['voters']['id_example']); ?>, Jane Wanjiru&#10;CS/MK/0701/09/23, Peter Otieno"><?php echo e($import['text'] ?? ''); ?></textarea>
+        <span class="hint">Copying two columns from Excel or Google Sheets works too. Anyone already registered is skipped.</span>
       </div>
       <button class="btn btn-primary" type="submit"><?php echo icon('plus'); ?>Create login details</button>
     </form>

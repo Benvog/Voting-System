@@ -15,6 +15,13 @@ $config = [
     'name'     => 'VoteMS',
     'timezone' => 'Africa/Nairobi',
   ],
+  // How voters identify themselves. The ID is stored upper-case with spaces
+  // removed, then checked against this pattern.
+  'voters' => [
+    'id_label'   => 'Registration number',
+    'id_example' => 'CS/MK/0700/09/23',
+    'id_pattern' => '#^[A-Z0-9][A-Z0-9/.\-]{1,38}[A-Z0-9]$#',
+  ],
   'session' => [
     'name' => 'VOTINGSESSID',
   ],

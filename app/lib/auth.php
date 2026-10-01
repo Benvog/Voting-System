@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 
-const LOGIN_MAX_FAILURES    = 5;   // per voter ID / username: this is what stops PIN guessing
+const LOGIN_MAX_FAILURES    = 5;   // per voter ID or username: this is what stops PIN guessing
 const LOGIN_MAX_IP_FAILURES = 100; // per IP; high because a school lab may share one address
 const LOGIN_WINDOW_MINUTES  = 15;
 
@@ -27,11 +27,37 @@ function start_secure_session(): void
   session_start();
 }
 
-/* Voter IDs are generated as VOT-XXXXXX (older ones as VTR-XXXXXX), so the
-   login form can tell a voter from an admin by the shape of the ID alone. */
-function is_voter_uid(string $id): bool
+/* ---------------- VOTER IDS ----------------
+   Voters log in with an ID they already have, such as a registration number
+   (CS/MK/0700/09/23). It is stored upper-case without spaces, so
+   "cs/mk/0700/09/23" and "CS / MK / 0700 / 09 / 23" match the same voter. */
+
+function normalize_voter_uid(string $id): string
 {
-  return (bool)preg_match('/^V(OT|TR)-[0-9A-F]{6}$/i', $id);
+  return strtoupper((string)preg_replace('/\s+/', '', $id));
+}
+
+function valid_voter_uid(string $uid): bool
+{
+  return (bool)preg_match(config()['voters']['id_pattern'], $uid);
+}
+
+function voter_id_label(): string
+{
+  return config()['voters']['id_label'];
+}
+
+/* Voter IDs and admin usernames share one login box, so neither may equal
+   the other. Returns which kind of account already uses $id, or null. */
+function identifier_owner(PDO $pdo, string $id): ?string
+{
+  $v = $pdo->prepare("SELECT 1 FROM voters WHERE voter_uid = :u");
+  $v->execute([':u' => normalize_voter_uid($id)]);
+  if ($v->fetchColumn()) return 'voter';
+  $a = $pdo->prepare("SELECT 1 FROM admins WHERE username = :u");
+  $a->execute([':u' => trim($id)]);
+  if ($a->fetchColumn()) return 'admin';
+  return null;
 }
 
 /* Starting a new login always wipes the previous one, so one browser can

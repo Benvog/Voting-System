@@ -28,8 +28,8 @@ if (is_post()) {
         $username = trim((string)($_POST['username'] ?? ''));
         if (!preg_match('/^[A-Za-z0-9._-]{3,50}$/', $username)) {
             flash('error', 'Usernames are 3–50 characters: letters, numbers, dots, dashes and underscores.');
-        } elseif (is_voter_uid($username)) {
-            flash('error', 'That looks like a voter ID. Pick a username that doesn\'t start with VOT- or VTR-.');
+        } elseif (identifier_owner($pdo, $username) === 'voter') {
+            flash('error', 'A voter already logs in with that ' . strtolower(voter_id_label()) . '. Pick a different username.');
         } else {
             try {
                 $pdo->prepare("UPDATE admins SET username = :u WHERE id = :id")->execute([':u' => $username, ':id' => $admin['id']]);

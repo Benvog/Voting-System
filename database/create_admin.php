@@ -16,9 +16,13 @@ if (PHP_SAPI !== 'cli') {
 require_once __DIR__ . '/../app/lib/auth.php';
 
 $username = $argv[1] ?? '';
-if (!preg_match('/^[A-Za-z0-9._-]{3,50}$/', $username) || is_voter_uid($username)) {
+if (!preg_match('/^[A-Za-z0-9._-]{3,50}$/', $username)) {
     fwrite(STDERR, "Usage: php database/create_admin.php <username>\n"
-        . "Usernames are 3-50 letters, numbers, dots, dashes or underscores, and can't look like a voter ID.\n");
+        . "Usernames are 3-50 letters, numbers, dots, dashes or underscores.\n");
+    exit(1);
+}
+if (identifier_owner(db(), $username) === 'voter') {
+    fwrite(STDERR, "A voter already logs in with '$username'. Pick a different username.\n");
     exit(1);
 }
 

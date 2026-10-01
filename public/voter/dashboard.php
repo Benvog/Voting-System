@@ -48,7 +48,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
       <?php echo icon($upcoming ? 'calendar' : 'ballot'); ?>
       <?php if ($upcoming): ?>
         <h3><?php echo e($upcoming['name']); ?> opens <?php echo e(fmt_datetime($upcoming['starts_at'], 'l d M, H:i')); ?></h3>
-        <p>Come back then with the same voter ID and PIN.</p>
+        <p>Come back then and log in with your <?php echo e(strtolower(voter_id_label())); ?> and PIN.</p>
       <?php else: ?>
         <h3>No election is open right now</h3>
         <p>When voting opens, your ballot will appear here.</p>
