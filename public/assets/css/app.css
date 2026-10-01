@@ -559,3 +559,4 @@ h2, h3 { font-weight: 600; letter-spacing: -.015em; }
 .error-list li { margin-top: 2px; }
 .card-body > .alert { margin-bottom: 16px; }
 #new-logins { scroll-margin-top: 76px; }
+.centered-actions { justify-content: center; margin-top: 16px; }

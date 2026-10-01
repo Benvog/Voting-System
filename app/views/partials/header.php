@@ -90,6 +90,7 @@ function nav_link(string $href, string $iconName, string $label, string $key, st
   <div class="bar-inner">
     <a class="brand" href="/voter/dashboard.php"><span class="brand-mark"><?php echo icon('logo'); ?></span><?php echo e($appName); ?></a>
     <div class="bar-end">
+      <a class="bar-link" href="/results.php">Results</a>
       <?php $voter = current_voter(); ?>
       <span class="user-chip voter-chip" title="<?php echo e(voter_id_label() . ': ' . ($voter['voter_uid'] ?? '')); ?>"><span class="avatar" aria-hidden="true"><?php echo e(initials($voter['full_name'] ?? '')); ?></span><span class="user-name"><?php echo e($voter['full_name'] ?? ''); ?></span></span>
       <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle dark mode"><?php echo icon('moon', 'when-light') . icon('sun', 'when-dark'); ?></button>

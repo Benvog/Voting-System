@@ -75,6 +75,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
             <div class="done-mark"><?php echo icon('check'); ?></div>
             <h2>You've voted in every position</h2>
             <p class="muted">Thank you. Your votes are recorded and can't be changed.</p>
+            <div class="form-actions centered-actions"><a class="btn btn-ghost" href="/results.php?election_id=<?php echo (int)$election['id']; ?>"><?php echo icon('chart'); ?>See turnout and results</a></div>
           </div>
         <?php else: ?>
           <div>

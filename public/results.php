@@ -29,7 +29,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
 <div class="page-head">
   <div>
     <h1>Election results</h1>
-    <p><?php echo $isLive ? 'Voting is still open, so these numbers will change.' : 'Final counts for elections that have closed.'; ?></p>
+    <p><?php echo $isLive ? 'Voting is still open. Turnout updates live; candidate counts are published when voting closes.' : 'Turnout and final counts for each position.'; ?></p>
   </div>
 </div>
 
@@ -50,7 +50,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
     <?php endif; ?>
   </form>
 
-  <?php render_results($pdo, $election); ?>
+  <?php render_results($pdo, $election, counts_are_public($election)); ?>
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/../app/views/partials/footer.php'; ?>

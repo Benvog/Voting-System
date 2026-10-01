@@ -36,6 +36,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
 
   <div class="form-actions">
     <a class="btn btn-primary" href="/voter/dashboard.php">Back to your ballot</a>
+    <a class="btn btn-ghost" href="/results.php"><?php echo icon('chart'); ?>See results</a>
     <a class="btn btn-ghost" href="/logout.php"><?php echo icon('logout'); ?>Log out</a>
   </div>
 </div>

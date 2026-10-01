@@ -149,13 +149,24 @@ function render_participation_chart(array $series, int $eligible): string
     return $html;
 }
 
-function render_results(PDO $pdo, array $election): void
+/* Candidate counts go public only once votes can no longer change: the
+   election is closed, or its closing time has passed. Until then the public
+   sees turnout only, so a running count can't sway people still to vote. */
+function counts_are_public(array $election): bool
+{
+    return in_array(election_phase($election), ['closed', 'ended'], true);
+}
+
+function render_results(PDO $pdo, array $election, bool $showCounts = true): void
 {
     $data    = results_data($pdo, $election);
     $s       = $data['summary'];
     $turnout = min(100, $s['turnout']);
     $phase   = election_phase($election);
     $series  = participation_series($election, $data['firsts']);
+    if (!$showCounts) {
+        $data['positions'] = []; // never sent to the browser, not just hidden
+    }
     ?>
     <div class="stats">
       <div class="card stat">
@@ -178,7 +189,7 @@ function render_results(PDO $pdo, array $election): void
           echo $phase === 'closed' ? e(fmt_datetime($election['ends_at'], 'd M Y'))
              : ($phase === 'live' ? ($election['ends_at'] ? e(fmt_datetime($election['ends_at'], 'd M, H:i')) : 'When closed') : phase_badge($election));
         ?></div>
-        <?php if ($phase === 'live'): ?><div class="stat-sub">Counts are live and may change</div><?php endif; ?>
+        <?php if ($phase === 'live'): ?><div class="stat-sub"><?php echo $showCounts ? 'Counts are live and may change' : 'Results follow after this'; ?></div><?php endif; ?>
       </div>
     </div>
 
@@ -194,7 +205,13 @@ function render_results(PDO $pdo, array $election): void
       </section>
     <?php endif; ?>
 
-    <?php if (!$data['positions']): ?>
+    <?php if (!$showCounts): ?>
+      <div class="card"><div class="empty">
+        <?php echo icon('lock'); ?>
+        <h3>Results are published when voting closes</h3>
+        <p><?php echo $election['ends_at'] ? 'Candidate counts appear here after ' . e(fmt_datetime($election['ends_at'], 'l d M, H:i')) . '.' : 'Candidate counts appear here once the election is closed.'; ?> Until then, only turnout is shown so a running count can't sway anyone still to vote.</p>
+      </div></div>
+    <?php elseif (!$data['positions']): ?>
       <div class="card"><div class="empty"><?php echo icon('chart'); ?><h3>Nothing to count yet</h3><p>This election has no positions.</p></div></div>
     <?php endif; ?>
 
