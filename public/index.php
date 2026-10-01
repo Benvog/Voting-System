@@ -1,190 +1,89 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/../app/lib/db.php';
+require_once __DIR__ . '/../app/lib/helpers.php';
+require_once __DIR__ . '/../app/lib/auth.php';
+
+start_secure_session();
 
 try {
-    $pdo            = db();
-    $activeElection = $pdo->query("
-        SELECT name, ends_at FROM elections
-        WHERE status = 'active'
-          AND (starts_at IS NULL OR starts_at <= NOW())
-          AND (ends_at   IS NULL OR ends_at   >= NOW())
-        LIMIT 1
-    ")->fetch();
-    $lastElection = $pdo->query("
-        SELECT name, ends_at FROM elections
+    $pdo  = db();
+    $live = current_election($pdo);
+    $last = $live ? null : ($pdo->query("
+        SELECT id, name, status, starts_at, ends_at FROM elections
         WHERE status = 'closed'
-        ORDER BY ends_at DESC
+        ORDER BY COALESCE(ends_at, created_at) DESC
         LIMIT 1
-    ")->fetch();
+    ")->fetch() ?: null);
+    $summary = $live ? election_summary($pdo, (int)$live['id']) : null;
 } catch (\Exception $e) {
-    $activeElection = null;
-    $lastElection   = null;
+    $live = $last = $summary = null;
 }
 
 $pageTitle = 'Welcome';
 require_once __DIR__ . '/../app/views/partials/header.php';
 ?>
 
-<!-- Hero -->
-<div style="text-align:center; padding: 64px 24px 48px;">
-
-  <div style="
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 80px; height: 80px;
-    background: linear-gradient(135deg, var(--primary), var(--primary-light));
-    border-radius: 22px;
-    font-size: 2.2rem;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-md);
-  ">🗳</div>
-
-  <h1 style="
-    font-family: 'Sora', sans-serif;
-    font-weight: 800;
-    font-size: 2.6rem;
-    color: var(--text);
-    letter-spacing: -.04em;
-    line-height: 1.1;
-    margin-bottom: 14px;
-  ">Voting Management System</h1>
-
-  <p style="
-    color: var(--text-muted);
-    font-size: 1.05rem;
-    max-width: 480px;
-    margin: 0 auto 32px;
-    line-height: 1.6;
-  ">
-    A secure, simple platform for conducting elections online.
-    Cast your vote or manage the entire election process.
-  </p>
-
-  <?php if ($activeElection): ?>
-
-    <!-- Live badge -->
-    <div style="margin-bottom: 24px;">
-      <span class="badge badge-active" style="font-size:.88rem; padding: 6px 18px;">
-        🟢 <?php echo htmlspecialchars($activeElection['name']); ?> — Live Now
-      </span>
+<section class="hero">
+  <div>
+    <h1>Vote online, once per position.</h1>
+    <p class="lead">Log in with the voter ID and PIN you were given, choose a candidate for each position, and confirm your ballot in one step.</p>
+    <div class="cta">
+      <a class="btn btn-primary btn-lg" href="<?php echo e(home_for_session() ?? '/login.php'); ?>"><?php echo home_for_session() ? 'Open dashboard' : 'Log in to vote'; ?><?php echo icon('arrow-right'); ?></a>
+      <a class="btn btn-ghost btn-lg" href="/results.php"><?php echo icon('chart'); ?>See results</a>
     </div>
+  </div>
 
-    <?php if ($activeElection['ends_at']): ?>
-    <!-- Countdown label -->
-    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:12px;">Voting closes in</div>
-    <!-- Countdown tiles -->
-    <div id="countdown-wrap" style="display:inline-grid;grid-template-columns:repeat(4,80px);gap:10px;margin-bottom:40px;">
-      <?php foreach (['days'=>'Days','hours'=>'Hours','mins'=>'Mins','secs'=>'Secs'] as $id=>$label): ?>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 8px 12px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;">
-        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--primary),var(--primary-light));"></div>
-        <div id="cd-<?php echo $id; ?>" style="font-family:'Sora',sans-serif;font-weight:800;font-size:2.2rem;color:var(--primary);line-height:1;letter-spacing:-.02em;transition:color .3s;">00</div>
-        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-top:6px;"><?php echo $label; ?></div>
-      </div>
-      <?php endforeach; ?>
-    </div>
-    <script>
-    (function(){
-      var deadline=new Date("<?php echo date('Y-m-d\TH:i:s',strtotime($activeElection['ends_at'])); ?>").getTime();
-      var ids=['days','hours','mins','secs'],els={};
-      ids.forEach(function(id){els[id]=document.getElementById('cd-'+id);});
-      function pad(n){return n<10?'0'+n:String(n);}
-      function tick(){
-        var diff=deadline-Date.now();
-        if(diff<=0){document.getElementById('countdown-wrap').innerHTML='<p style="color:var(--text-muted);font-size:.95rem;grid-column:1/-1;">Voting has closed.</p>';return;}
-        els.days.textContent=pad(Math.floor(diff/86400000));
-        els.hours.textContent=pad(Math.floor((diff%86400000)/3600000));
-        els.mins.textContent=pad(Math.floor((diff%3600000)/60000));
-        els.secs.textContent=pad(Math.floor((diff%60000)/1000));
-        var col=diff<3600000?'var(--danger)':'var(--primary)';
-        ids.forEach(function(id){els[id].style.color=col;});
-      }
-      tick();setInterval(tick,1000);
-    })();
-    </script>
-    <?php endif; ?>
-
-  <?php elseif ($lastElection): ?>
-
-    <!-- No active election — show last closed -->
-    <div style="margin-bottom:36px;">
-      <span class="badge badge-closed" style="font-size:.85rem;padding:6px 16px;display:inline-block;margin-bottom:10px;">
-        No election currently running
-      </span>
-      <p class="text-muted" style="font-size:.88rem;margin-top:8px;">
-        Last election: <strong><?php echo htmlspecialchars($lastElection['name']); ?></strong>
-        <?php if ($lastElection['ends_at']): ?>
-          — closed <?php echo date('d M Y', strtotime($lastElection['ends_at'])); ?>
+  <div class="card status-card">
+    <div class="card-body">
+      <?php if ($live): ?>
+        <div><?php echo phase_badge($live); ?></div>
+        <div>
+          <h2><?php echo e($live['name']); ?></h2>
+          <p class="muted small"><?php echo $live['ends_at'] ? 'Voting closes ' . fmt_datetime($live['ends_at']) : 'Voting is open'; ?></p>
+        </div>
+        <?php if ($live['ends_at']): ?>
+          <div class="countdown" data-countdown="<?php echo e(date('Y-m-d\TH:i:s', strtotime($live['ends_at']))); ?>">
+            <div><b data-unit="d">00</b><span>Days</span></div>
+            <div><b data-unit="h">00</b><span>Hours</span></div>
+            <div><b data-unit="m">00</b><span>Mins</span></div>
+            <div><b data-unit="s">00</b><span>Secs</span></div>
+          </div>
         <?php endif; ?>
-      </p>
+        <div>
+          <div class="meter-row"><span>Turnout so far</span><strong><?php echo min(100, $summary['turnout']); ?>%</strong></div>
+          <?php echo meter($summary['turnout'], 'Turnout'); ?>
+        </div>
+      <?php elseif ($last): ?>
+        <div><span class="badge badge-muted">No election running</span></div>
+        <div>
+          <h2><?php echo e($last['name']); ?></h2>
+          <p class="muted small">The most recent election<?php echo $last['ends_at'] ? ', closed ' . fmt_datetime($last['ends_at'], 'd M Y') : ''; ?>.</p>
+        </div>
+        <a class="btn btn-ghost" href="/results.php?election_id=<?php echo (int)$last['id']; ?>"><?php echo icon('chart'); ?>View final results</a>
+      <?php else: ?>
+        <div><span class="badge badge-muted">No elections yet</span></div>
+        <p class="muted">When an election opens, it will show here with a countdown to closing time.</p>
+      <?php endif; ?>
     </div>
+  </div>
+</section>
 
-  <?php else: ?>
-
-    <!-- No elections at all -->
-    <div style="margin-bottom:36px;">
-      <span class="badge badge-draft" style="font-size:.85rem;padding:6px 16px;">
-        No elections scheduled yet
-      </span>
-    </div>
-
-  <?php endif; ?>
-
-</div>
-
-<!-- Portal Cards -->
-<div style="
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 20px;
-  max-width: 760px;
-  margin: 0 auto 48px;
-">
-
-  <a href="/voter/login.php" style="text-decoration:none;">
-    <div class="card" style="text-align:center; padding:40px 28px; border:2px solid var(--border); transition:all .22s; cursor:pointer;"
-      onmouseover="this.style.borderColor='var(--primary)'; this.style.transform='translateY(-4px)'; this.style.boxShadow='var(--shadow-lg)';"
-      onmouseout="this.style.borderColor=''; this.style.transform=''; this.style.boxShadow='';">
-      <div style="width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;font-size:1.8rem;margin:0 auto 18px;box-shadow:0 8px 24px var(--primary-glow);">🧑‍💼</div>
-      <div style="font-family:'Sora',sans-serif;font-weight:800;font-size:1.25rem;color:var(--text);margin-bottom:8px;">Voter Portal</div>
-      <p style="color:var(--text-muted);font-size:.9rem;line-height:1.5;margin-bottom:20px;">Log in with your Voter ID and PIN to access your ballot and cast your votes.</p>
-      <span class="btn btn-primary" style="pointer-events:none;">Enter Voter Portal →</span>
-    </div>
-  </a>
-
-  <a href="/admin/login.php" style="text-decoration:none;">
-    <div class="card" style="text-align:center; padding:40px 28px; border:2px solid var(--border); transition:all .22s; cursor:pointer;"
-      onmouseover="this.style.borderColor='var(--accent)'; this.style.transform='translateY(-4px)'; this.style.boxShadow='var(--shadow-lg)';"
-      onmouseout="this.style.borderColor=''; this.style.transform=''; this.style.boxShadow='';">
-      <div style="width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--accent-dark),var(--accent));display:flex;align-items:center;justify-content:center;font-size:1.8rem;margin:0 auto 18px;box-shadow:0 8px 24px rgba(244,162,97,.25);">⚙️</div>
-      <div style="font-family:'Sora',sans-serif;font-weight:800;font-size:1.25rem;color:var(--text);margin-bottom:8px;">Admin Panel</div>
-      <p style="color:var(--text-muted);font-size:.9rem;line-height:1.5;margin-bottom:20px;">Manage elections, positions, candidates, and voters. View live results.</p>
-      <span class="btn btn-accent" style="pointer-events:none;">Enter Admin Panel →</span>
-    </div>
-  </a>
-
-</div>
-
-<!-- Results link -->
-<div style="text-align:center; margin-bottom:24px;">
-  <a href="/results.php" class="btn btn-ghost">📊 View Public Results →</a>
-</div>
-
-<!-- Features strip -->
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;max-width:760px;margin:0 auto;padding-top:16px;border-top:1px solid var(--border);">
-  <?php foreach ([
-    ['🔒','Secure',      'Password hashing, CSRF protection & session hardening'],
-    ['✅','One Vote',    'Database constraints prevent any double voting'],
-    ['📊','Live Results','Vote counts update in real time for admins'],
-    ['🌙','Dark Mode',   'Switch between light and dark with one click'],
-  ] as $f): ?>
-    <div style="text-align:center;padding:20px 12px;">
-      <div style="font-size:1.6rem;margin-bottom:8px;"><?php echo $f[0]; ?></div>
-      <div style="font-family:'Sora',sans-serif;font-weight:700;font-size:.92rem;color:var(--text);margin-bottom:4px;"><?php echo $f[1]; ?></div>
-      <div style="font-size:.8rem;color:var(--text-muted);line-height:1.4;"><?php echo $f[2]; ?></div>
-    </div>
-  <?php endforeach; ?>
-</div>
+<section class="features" aria-label="How it works">
+  <div class="card feature">
+    <?php echo icon('check-circle'); ?>
+    <h3>One vote per position</h3>
+    <p>The database itself rejects a second vote for the same position, even if two requests arrive at once.</p>
+  </div>
+  <div class="card feature">
+    <?php echo icon('lock'); ?>
+    <h3>Private login</h3>
+    <p>PINs are stored hashed, and repeated wrong guesses are locked out for a while.</p>
+  </div>
+  <div class="card feature">
+    <?php echo icon('chart'); ?>
+    <h3>Open results</h3>
+    <p>Anyone can follow turnout and per-position counts while voting is open and after it closes.</p>
+  </div>
+</section>
 
 <?php require_once __DIR__ . '/../app/views/partials/footer.php'; ?>

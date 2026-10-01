@@ -1,240 +1,151 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/../../app/lib/db.php';
+require_once __DIR__ . '/../../app/lib/helpers.php';
 require_once __DIR__ . '/../../app/lib/auth.php';
-require_once __DIR__ . '/../../app/lib/csrf.php';
+require_once __DIR__ . '/../../app/lib/election_actions.php';
 
 start_secure_session();
 require_admin();
 
-$pdo     = db();
-$success = '';
-$error   = '';
+$pdo = db();
 
-/* ── Handle POST actions ── */
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $token = $_POST['csrf_token'] ?? '';
-    if (!csrf_verify($token)) {
-        $error = 'Invalid request. Please refresh and try again.';
-    } else {
-        $action = $_POST['action'] ?? '';
-
-        /* Create */
-        if ($action === 'create') {
-            $name      = trim($_POST['name'] ?? '');
-            $startsAt  = trim($_POST['starts_at'] ?? '') ?: null;
-            $endsAt    = trim($_POST['ends_at']   ?? '') ?: null;
-
-            if ($name === '') {
-                $error = 'Election name is required.';
-            } else {
-                $stmt = $pdo->prepare("
-                    INSERT INTO elections (name, status, starts_at, ends_at)
-                    VALUES (:name, 'draft', :starts_at, :ends_at)
-                ");
-                $stmt->execute([':name' => $name, ':starts_at' => $startsAt, ':ends_at' => $endsAt]);
-                $success = 'Election "' . htmlspecialchars($name) . '" created.';
-            }
-
-        /* Activate */
-        } elseif ($action === 'activate') {
-            $id = (int)($_POST['election_id'] ?? 0);
-            $pdo->prepare("UPDATE elections SET status = 'active' WHERE id = :id")
-                ->execute([':id' => $id]);
-            $success = 'Election activated.';
-
-        /* Close */
-        } elseif ($action === 'close') {
-            $id = (int)($_POST['election_id'] ?? 0);
-            $pdo->prepare("UPDATE elections SET status = 'closed' WHERE id = :id")
-                ->execute([':id' => $id]);
-            $success = 'Election closed.';
-
-        /* Delete */
-        } elseif ($action === 'delete') {
-            $id = (int)($_POST['election_id'] ?? 0);
-            $pdo->prepare("DELETE FROM elections WHERE id = :id")
-                ->execute([':id' => $id]);
-            $success = 'Election deleted.';
-
-        /* Update dates */
-        } elseif ($action === 'update_dates') {
-            $id       = (int)($_POST['election_id'] ?? 0);
-            $startsAt = trim($_POST['starts_at'] ?? '') ?: null;
-            $endsAt   = trim($_POST['ends_at']   ?? '') ?: null;
-            $pdo->prepare("UPDATE elections SET starts_at = :s, ends_at = :e WHERE id = :id")
-                ->execute([':s' => $startsAt, ':e' => $endsAt, ':id' => $id]);
-            $success = 'Dates updated.';
-        }
+if (is_post()) {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+        flash('error', 'Your session expired. Please try again.');
+        redirect('/admin/elections.php');
     }
+
+    $action = (string)($_POST['action'] ?? '');
+
+    if ($action === 'create') {
+        $name     = trim((string)($_POST['name'] ?? ''));
+        $startsAt = parse_datetime_input($_POST['starts_at'] ?? null);
+        $endsAt   = parse_datetime_input($_POST['ends_at'] ?? null);
+
+        if ($name === '') {
+            flash('error', 'Give the election a name.');
+        } elseif ($problem = validate_window($startsAt, $endsAt)) {
+            flash('error', $problem);
+        } else {
+            $pdo->prepare("INSERT INTO elections (name, status, starts_at, ends_at) VALUES (:n, 'draft', :s, :e)")
+                ->execute([':n' => $name, ':s' => $startsAt, ':e' => $endsAt]);
+            $id = (int)$pdo->lastInsertId();
+            flash('success', "Created \"$name\". Add its positions and candidates next.");
+            redirect('/admin/election.php?id=' . $id);
+        }
+        redirect('/admin/elections.php#new');
+    }
+
+    election_status_action($pdo, $action, (int)($_POST['election_id'] ?? 0));
+    redirect('/admin/elections.php');
 }
 
-$elections = $pdo->query("SELECT * FROM elections ORDER BY created_at DESC")->fetchAll();
+$elections = $pdo->query("
+    SELECT e.*,
+      (SELECT COUNT(*) FROM positions p WHERE p.election_id = e.id AND p.is_active = 1) AS positions,
+      (SELECT COUNT(DISTINCT v.voter_id) FROM votes v WHERE v.election_id = e.id) AS voted
+    FROM elections e
+    ORDER BY FIELD(e.status, 'active', 'draft', 'closed'), e.id DESC
+")->fetchAll();
+$eligible = (int)$pdo->query("SELECT COUNT(*) FROM voters WHERE is_active = 1")->fetchColumn();
 
-$pageTitle = 'Manage Elections';
+$pageTitle = 'Elections';
+$layout    = 'admin';
+$activeNav = 'elections';
 require_once __DIR__ . '/../../app/views/partials/header.php';
 ?>
 
-<div class="page-header">
+<div class="page-head">
   <div>
     <h1>Elections</h1>
-    <p>Create and manage elections, set time windows, and control status.</p>
+    <p>Each election has its own positions, candidates and voting window. Only one can be open at a time.</p>
   </div>
 </div>
 
-<?php if ($success): ?>
-  <div class="alert alert-success"><?php echo $success; ?></div>
-<?php endif; ?>
-<?php if ($error): ?>
-  <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
-<?php endif; ?>
-
-<!-- Create Election -->
-<div class="card mb-2">
-  <div class="section-title">New Election</div>
-  <form method="post" novalidate>
-    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
-    <input type="hidden" name="action" value="create">
-
-    <div class="form-group">
-      <label for="name">Election Name</label>
-      <input class="form-control" type="text" id="name" name="name" required placeholder="e.g. Student Council 2025">
+<section class="card" aria-labelledby="list-title">
+  <div class="card-head"><h2 id="list-title">All elections</h2></div>
+  <?php if (!$elections): ?>
+    <div class="empty">
+      <?php echo icon('ballot'); ?>
+      <h3>No elections yet</h3>
+      <p>Create your first one below.</p>
     </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label for="starts_at">Start Date &amp; Time <span class="text-muted">(optional)</span></label>
-        <input class="form-control" type="datetime-local" id="starts_at" name="starts_at">
-      </div>
-      <div class="form-group">
-        <label for="ends_at">End Date &amp; Time <span class="text-muted">(optional)</span></label>
-        <input class="form-control" type="datetime-local" id="ends_at" name="ends_at">
-      </div>
+  <?php else: ?>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Election</th><th>Status</th><th>Voting window</th><th class="num">Turnout</th><th class="actions"><span class="sr-only">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          <?php foreach ($elections as $el):
+            $turnout = $eligible > 0 ? min(100, (int)round($el['voted'] / $eligible * 100)) : 0;
+          ?>
+            <tr>
+              <td>
+                <a class="row-title" href="/admin/election.php?id=<?php echo (int)$el['id']; ?>"><?php echo e($el['name']); ?></a>
+                <div class="row-sub"><?php echo plural((int)$el['positions'], 'position'); ?></div>
+              </td>
+              <td><?php echo phase_badge($el); ?></td>
+              <td class="row-sub nowrap"><?php echo $el['starts_at'] || $el['ends_at'] ? fmt_datetime($el['starts_at'], 'd M, H:i') . ' → ' . fmt_datetime($el['ends_at'], 'd M, H:i') : 'Open until closed'; ?></td>
+              <td class="num"><?php echo $el['status'] === 'draft' ? '—' : $turnout . '%'; ?></td>
+              <td class="actions">
+                <?php if ($el['status'] === 'draft'): ?>
+                  <form class="inline-form" method="post" data-confirm="Voters will be able to vote in &quot;<?php echo e($el['name']); ?>&quot; straight away, unless it has a later opening time." data-confirm-title="Open voting?" data-confirm-ok="Open voting" data-confirm-tone="primary">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="activate">
+                    <input type="hidden" name="election_id" value="<?php echo (int)$el['id']; ?>">
+                    <button class="btn btn-ghost btn-sm" type="submit"><?php echo icon('play'); ?>Open</button>
+                  </form>
+                <?php elseif ($el['status'] === 'active'): ?>
+                  <form class="inline-form" method="post" data-confirm="Nobody will be able to vote in &quot;<?php echo e($el['name']); ?>&quot; after this, and it can't be reopened." data-confirm-title="Close this election?" data-confirm-ok="Close election">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="action" value="close">
+                    <input type="hidden" name="election_id" value="<?php echo (int)$el['id']; ?>">
+                    <button class="btn btn-ghost btn-sm" type="submit"><?php echo icon('stop'); ?>Close</button>
+                  </form>
+                <?php endif; ?>
+                <a class="btn btn-quiet btn-sm" href="/admin/election.php?id=<?php echo (int)$el['id']; ?>">Manage<?php echo icon('chevron-right'); ?></a>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
     </div>
+  <?php endif; ?>
+</section>
 
-    <button type="submit" class="btn btn-primary">+ Create Election</button>
-  </form>
-</div>
-
-<!-- Elections Table -->
-<div class="section-title">All Elections</div>
-
-<?php if (empty($elections)): ?>
-  <div class="card" style="text-align:center; padding: 48px; color: var(--text-muted);">
-    No elections yet. Create one above.
+<section class="card" id="new" aria-labelledby="new-title">
+  <div class="card-head">
+    <div>
+      <h2 id="new-title">New election</h2>
+      <div class="sub">It starts as a draft. Nobody can vote until you open it.</div>
+    </div>
   </div>
-<?php else: ?>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Name</th>
-          <th>Status</th>
-          <th>Start</th>
-          <th>End</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($elections as $e): ?>
-        <tr>
-          <td class="text-muted"><?php echo (int)$e['id']; ?></td>
-          <td><strong><?php echo htmlspecialchars($e['name']); ?></strong></td>
-          <td>
-            <?php
-              $badge = match($e['status']) {
-                'active' => 'badge-active',
-                'closed' => 'badge-closed',
-                default  => 'badge-draft',
-              };
-            ?>
-            <span class="badge <?php echo $badge; ?>"><?php echo htmlspecialchars($e['status']); ?></span>
-          </td>
-          <td class="text-muted" style="font-size:.85rem;">
-            <?php echo $e['starts_at'] ? date('d M Y, H:i', strtotime($e['starts_at'])) : '—'; ?>
-          </td>
-          <td class="text-muted" style="font-size:.85rem;">
-            <?php echo $e['ends_at'] ? date('d M Y, H:i', strtotime($e['ends_at'])) : '—'; ?>
-          </td>
-          <td>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-
-              <?php if ($e['status'] === 'draft'): ?>
-                <form method="post">
-                  <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
-                  <input type="hidden" name="action" value="activate">
-                  <input type="hidden" name="election_id" value="<?php echo (int)$e['id']; ?>">
-                  <button class="btn btn-success btn-sm" type="submit">Activate</button>
-                </form>
-              <?php elseif ($e['status'] === 'active'): ?>
-                <form method="post">
-                  <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
-                  <input type="hidden" name="action" value="close">
-                  <input type="hidden" name="election_id" value="<?php echo (int)$e['id']; ?>">
-                  <button class="btn btn-accent btn-sm" type="submit">Close</button>
-                </form>
-              <?php endif; ?>
-
-              <!-- Edit dates toggle -->
-              <button
-                class="btn btn-ghost btn-sm"
-                onclick="toggleDates(<?php echo (int)$e['id']; ?>)"
-                type="button"
-              >Edit Dates</button>
-
-              <form method="post" onsubmit="return confirm('Delete this election and all its data?')">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
-                <input type="hidden" name="action" value="delete">
-                <input type="hidden" name="election_id" value="<?php echo (int)$e['id']; ?>">
-                <button class="btn btn-danger btn-sm" type="submit">Delete</button>
-              </form>
-
-            </div>
-
-            <!-- Inline date editor -->
-            <div id="dates-<?php echo (int)$e['id']; ?>" style="display:none; margin-top:10px;">
-              <form method="post">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrf_token()); ?>">
-                <input type="hidden" name="action" value="update_dates">
-                <input type="hidden" name="election_id" value="<?php echo (int)$e['id']; ?>">
-                <div class="form-row" style="margin-bottom:8px;">
-                  <div class="form-group" style="margin-bottom:0;">
-                    <label>Start</label>
-                    <input
-                      class="form-control"
-                      type="datetime-local"
-                      name="starts_at"
-                      value="<?php echo $e['starts_at'] ? date('Y-m-d\TH:i', strtotime($e['starts_at'])) : ''; ?>"
-                    >
-                  </div>
-                  <div class="form-group" style="margin-bottom:0;">
-                    <label>End</label>
-                    <input
-                      class="form-control"
-                      type="datetime-local"
-                      name="ends_at"
-                      value="<?php echo $e['ends_at'] ? date('Y-m-d\TH:i', strtotime($e['ends_at'])) : ''; ?>"
-                    >
-                  </div>
-                </div>
-                <button class="btn btn-primary btn-sm" type="submit">Save Dates</button>
-              </form>
-            </div>
-
-          </td>
-        </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
+  <div class="card-body">
+    <form method="post">
+      <?php echo csrf_field(); ?>
+      <input type="hidden" name="action" value="create">
+      <div class="field">
+        <label class="label" for="name">Name</label>
+        <input class="input" id="name" name="name" required maxlength="120" placeholder="Student Council Election 2027">
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label class="label" for="starts_at">Opens <span class="opt">(optional)</span></label>
+          <input class="input" type="datetime-local" id="starts_at" name="starts_at">
+          <span class="hint">Empty means as soon as you open it.</span>
+        </div>
+        <div class="field">
+          <label class="label" for="ends_at">Closes <span class="opt">(optional)</span></label>
+          <input class="input" type="datetime-local" id="ends_at" name="ends_at">
+          <span class="hint">Empty means when you close it.</span>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit"><?php echo icon('plus'); ?>Create election</button>
+      </div>
+    </form>
   </div>
-<?php endif; ?>
-
-<script>
-function toggleDates(id) {
-  var el = document.getElementById('dates-' + id);
-  el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-</script>
+</section>
 
 <?php require_once __DIR__ . '/../../app/views/partials/footer.php'; ?>

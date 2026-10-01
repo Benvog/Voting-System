@@ -1,274 +1,117 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/../../app/lib/db.php';
+require_once __DIR__ . '/../../app/lib/helpers.php';
 require_once __DIR__ . '/../../app/lib/auth.php';
 
 start_secure_session();
-require_voter_active(db());
+$pdo = db();
+require_voter_active($pdo);
 
-$pdo     = db();
-$voterId = (int)$_SESSION['voter_id'];
+$voterId  = (int)$_SESSION['voter_id'];
+$election = current_election($pdo);
 
-/* ── Active election ── */
-$activeElection = $pdo->query("
-    SELECT id, name, status, starts_at, ends_at
-    FROM elections
-    WHERE status = 'active'
-      AND (starts_at IS NULL OR starts_at <= NOW())
-      AND (ends_at   IS NULL OR ends_at   >= NOW())
-    LIMIT 1
-")->fetch();
-
-/* ── Positions + voting progress ── */
-$rows           = [];
-$totalPositions = 0;
-$votedCount     = 0;
-
-if ($activeElection) {
-    $stmt = $pdo->prepare("
-        SELECT
-            p.id   AS position_id,
-            p.name AS position_name,
-            v.id   AS vote_id,
-            c.name AS voted_candidate_name
-        FROM positions p
-        LEFT JOIN votes v
-               ON v.position_id = p.id
-              AND v.voter_id     = :vid
-              AND v.election_id  = :eid1
-        LEFT JOIN candidates c ON c.id = v.candidate_id
-        WHERE p.election_id = :eid2
-          AND p.is_active   = 1
-        ORDER BY p.sort_order ASC, p.created_at ASC
-    ");
-    $stmt->execute([
-        ':vid'  => $voterId,
-        ':eid1' => (int)$activeElection['id'],
-        ':eid2' => (int)$activeElection['id'],
-    ]);
-    $rows           = $stmt->fetchAll();
-    $totalPositions = count($rows);
-    foreach ($rows as $r) {
-        if (!empty($r['vote_id'])) $votedCount++;
-    }
+// If nothing is live, explain why: not started yet, or already finished.
+$upcoming = null;
+if (!$election) {
+    $upcoming = $pdo->query("
+        SELECT id, name, status, starts_at, ends_at FROM elections
+        WHERE status = 'active' AND starts_at > NOW()
+        ORDER BY starts_at LIMIT 1
+    ")->fetch() ?: null;
 }
 
-$progressPct = $totalPositions > 0 ? round(($votedCount / $totalPositions) * 100) : 0;
-$allDone     = $totalPositions > 0 && $votedCount === $totalPositions;
+$rows = [];
+if ($election) {
+    $stmt = $pdo->prepare("
+        SELECT p.id, p.name, c.name AS voted_for
+        FROM positions p
+        LEFT JOIN votes v ON v.position_id = p.id AND v.voter_id = :v AND v.election_id = :e1
+        LEFT JOIN candidates c ON c.id = v.candidate_id
+        WHERE p.election_id = :e2 AND p.is_active = 1
+        ORDER BY p.sort_order, p.id
+    ");
+    $stmt->execute([':v' => $voterId, ':e1' => (int)$election['id'], ':e2' => (int)$election['id']]);
+    $rows = $stmt->fetchAll();
+}
+$total     = count($rows);
+$done      = count(array_filter($rows, fn($r) => $r['voted_for'] !== null));
+$remaining = $total - $done;
 
-$pageTitle = 'My Ballot';
+$pageTitle = 'Your ballot';
+$layout    = 'voter';
 require_once __DIR__ . '/../../app/views/partials/header.php';
 ?>
 
-<div class="page-header">
-  <div>
-    <h1>My Ballot</h1>
-    <p>Logged in as <strong><?php echo htmlspecialchars((string)($_SESSION['voter_uid'] ?? '')); ?></strong></p>
+<?php if (!$election): ?>
+  <div class="card">
+    <div class="empty">
+      <?php echo icon($upcoming ? 'calendar' : 'ballot'); ?>
+      <?php if ($upcoming): ?>
+        <h3><?php echo e($upcoming['name']); ?> opens <?php echo e(fmt_datetime($upcoming['starts_at'], 'l d M, H:i')); ?></h3>
+        <p>Come back then with the same voter ID and PIN.</p>
+      <?php else: ?>
+        <h3>No election is open right now</h3>
+        <p>When voting opens, your ballot will appear here.</p>
+        <a class="btn btn-ghost" href="/results.php"><?php echo icon('chart'); ?>See past results</a>
+      <?php endif; ?>
+    </div>
   </div>
-</div>
-
-<?php if (!$activeElection): ?>
-
-  <div class="card" style="text-align:center; padding:64px 32px;">
-    <div style="font-size:3rem; margin-bottom:16px;">🗳</div>
-    <h2 style="font-family:'Sora',sans-serif; font-weight:800; color:var(--text); margin-bottom:8px;">No Active Election</h2>
-    <p class="text-muted">There is no election running right now. Check back later.</p>
-  </div>
-
 <?php else: ?>
+  <div class="page-head">
+    <div>
+      <h1><?php echo e($election['name']); ?></h1>
+      <p><?php echo $election['ends_at'] ? 'Voting closes ' . e(fmt_datetime($election['ends_at'], 'l d M, H:i')) . '.' : 'Voting is open.'; ?></p>
+    </div>
+    <?php echo phase_badge($election); ?>
+  </div>
 
-  <!-- Election Info + Countdown -->
-  <div class="card mb-2" style="border-left: 4px solid var(--primary);">
-
-    <div class="flex-between" style="margin-bottom: <?php echo $activeElection['ends_at'] ? '20px' : '0'; ?>;">
-      <div>
-        <div class="section-title" style="margin-bottom:4px;">Current Election</div>
-        <div style="font-family:'Sora',sans-serif; font-weight:800; font-size:1.3rem; color:var(--text);">
-          <?php echo htmlspecialchars($activeElection['name']); ?>
-        </div>
-        <?php if ($activeElection['ends_at']): ?>
-          <div class="text-muted mt-1" style="font-size:.82rem;">
-            Closes <?php echo date('d M Y, H:i', strtotime($activeElection['ends_at'])); ?>
+  <?php if ($total === 0): ?>
+    <div class="card"><div class="empty"><?php echo icon('list'); ?><h3>The ballot isn't ready yet</h3><p>No positions have been added. Check back soon.</p></div></div>
+  <?php else: ?>
+    <section class="card">
+      <div class="card-body stack">
+        <?php if ($remaining === 0): ?>
+          <div class="centered">
+            <div class="done-mark"><?php echo icon('check'); ?></div>
+            <h2>You've voted in every position</h2>
+            <p class="muted">Thank you. Your votes are recorded and can't be changed.</p>
+          </div>
+        <?php else: ?>
+          <div>
+            <div class="meter-row"><span><?php echo $done === 0 ? 'You haven\'t voted yet' : 'You\'ve voted in ' . $done . ' of ' . $total . ' positions'; ?></span><strong><?php echo plural($remaining, 'position') . ' left'; ?></strong></div>
+            <?php echo meter($total ? $done / $total * 100 : 0, 'Share of positions voted'); ?>
+          </div>
+          <a class="btn btn-primary btn-lg btn-block" href="/voter/ballot.php"><?php echo $done === 0 ? 'Start voting' : 'Continue voting'; ?><?php echo icon('arrow-right'); ?></a>
+        <?php endif; ?>
+        <?php if ($election['ends_at']): ?>
+          <div>
+            <div class="meter-row"><span>Time left to vote</span></div>
+            <div class="countdown" data-countdown="<?php echo e(date('Y-m-d\TH:i:s', strtotime($election['ends_at']))); ?>">
+              <div><b data-unit="d">00</b><span>Days</span></div>
+              <div><b data-unit="h">00</b><span>Hours</span></div>
+              <div><b data-unit="m">00</b><span>Mins</span></div>
+              <div><b data-unit="s">00</b><span>Secs</span></div>
+            </div>
           </div>
         <?php endif; ?>
       </div>
-      <span class="badge badge-active" style="font-size:.85rem; padding:6px 16px;">Live</span>
-    </div>
+    </section>
 
-    <?php if ($activeElection['ends_at']): ?>
-    <!-- Countdown -->
-    <div style="border-top: 1px solid var(--border); padding-top: 18px;">
-      <div style="
-        font-size: .72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .1em;
-        color: var(--text-muted);
-        margin-bottom: 12px;
-      ">Time remaining to vote</div>
-
-      <div id="countdown-wrap" style="
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 10px;
-        max-width: 380px;
-      ">
-        <?php
-          $units = ['days' => 'Days', 'hours' => 'Hours', 'mins' => 'Mins', 'secs' => 'Secs'];
-          foreach ($units as $id => $label):
-        ?>
-        <div style="
-          background: var(--bg-alt);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-sm);
-          padding: 14px 8px 10px;
-          text-align: center;
-          position: relative;
-          overflow: hidden;
-        ">
-          <div style="
-            position: absolute; top:0; left:0; right:0;
-            height: 3px;
-            background: linear-gradient(90deg, var(--primary), var(--primary-light));
-          "></div>
-          <div id="cd-<?php echo $id; ?>" style="
-            font-family: 'Sora', sans-serif;
-            font-weight: 800;
-            font-size: 1.8rem;
-            color: var(--primary);
-            line-height: 1;
-            transition: color .3s;
-          ">00</div>
-          <div style="
-            font-size: .65rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: .1em;
-            color: var(--text-muted);
-            margin-top: 5px;
-          "><?php echo $label; ?></div>
-        </div>
+    <section class="card" aria-labelledby="ballot-title">
+      <div class="card-head"><h2 id="ballot-title">Your ballot</h2></div>
+      <ul class="review-list">
+        <?php foreach ($rows as $r): ?>
+          <li>
+            <div>
+              <div class="pos"><?php echo e($r['name']); ?></div>
+              <div class="pick<?php echo $r['voted_for'] === null ? ' is-none' : ''; ?>"><?php echo $r['voted_for'] !== null ? e($r['voted_for']) : 'Not voted yet'; ?></div>
+            </div>
+            <?php echo $r['voted_for'] !== null ? '<span class="badge badge-live">Voted</span>' : '<span class="badge badge-muted">Open</span>'; ?>
+          </li>
         <?php endforeach; ?>
-      </div>
-    </div>
-
-    <script>
-    (function () {
-      var deadline = new Date("<?php echo date('Y-m-d\TH:i:s', strtotime($activeElection['ends_at'])); ?>").getTime();
-      var ids      = ['days','hours','mins','secs'];
-      var els      = {};
-      ids.forEach(function(id) { els[id] = document.getElementById('cd-' + id); });
-
-      function pad(n) { return n < 10 ? '0' + n : String(n); }
-
-      function tick() {
-        var diff = deadline - Date.now();
-
-        if (diff <= 0) {
-          document.getElementById('countdown-wrap').innerHTML =
-            '<p style="color:var(--text-muted);font-size:.9rem;">Voting period has ended.</p>';
-          return;
-        }
-
-        var d = Math.floor(diff / 86400000);
-        var h = Math.floor((diff % 86400000) / 3600000);
-        var m = Math.floor((diff % 3600000)  / 60000);
-        var s = Math.floor((diff % 60000)    / 1000);
-
-        els.days.textContent  = pad(d);
-        els.hours.textContent = pad(h);
-        els.mins.textContent  = pad(m);
-        els.secs.textContent  = pad(s);
-
-        // Turn red under 1 hour
-        var col = diff < 3600000 ? 'var(--danger)' : 'var(--primary)';
-        ids.forEach(function(id) { els[id].style.color = col; });
-      }
-
-      tick();
-      setInterval(tick, 1000);
-    })();
-    </script>
-    <?php endif; ?>
-
-  </div>
-
-  <!-- Progress -->
-  <div class="card mb-2">
-    <div class="flex-between mb-1">
-      <div class="section-title" style="margin-bottom:0;">Your Progress</div>
-      <span style="font-family:'Sora',sans-serif; font-weight:700; color:var(--primary); font-size:.95rem;">
-        <?php echo $votedCount; ?> / <?php echo $totalPositions; ?> positions
-      </span>
-    </div>
-    <div class="progress-wrap">
-      <div class="progress-bar" style="width: <?php echo $progressPct; ?>%;"></div>
-    </div>
-
-    <?php if ($allDone): ?>
-      <div class="alert alert-success mt-2" style="margin-bottom:0;">
-        ✅ You have voted in all positions. Your ballot is complete!
-      </div>
-    <?php elseif ($votedCount > 0): ?>
-      <p class="text-muted mt-1" style="font-size:.85rem;">
-        <?php echo $totalPositions - $votedCount; ?> position<?php echo ($totalPositions - $votedCount) !== 1 ? 's' : ''; ?> remaining.
-      </p>
-    <?php else: ?>
-      <p class="text-muted mt-1" style="font-size:.85rem;">You haven't voted yet. Cast your votes below.</p>
-    <?php endif; ?>
-  </div>
-
-  <!-- Positions -->
-  <?php if (empty($rows)): ?>
-    <div class="card" style="text-align:center; padding:48px; color:var(--text-muted);">
-      No positions have been set up for this election yet.
-    </div>
-  <?php else: ?>
-
-    <div class="section-title">Positions</div>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Position</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($rows as $i => $r): ?>
-          <tr>
-            <td class="text-muted"><?php echo $i + 1; ?></td>
-            <td><strong><?php echo htmlspecialchars($r['position_name']); ?></strong></td>
-            <td>
-              <?php if (!empty($r['vote_id'])): ?>
-                <span class="badge badge-voted">✓ Voted</span>
-                <span class="text-muted" style="font-size:.82rem; margin-left:6px;">
-                  <?php echo htmlspecialchars((string)$r['voted_candidate_name']); ?>
-                </span>
-              <?php else: ?>
-                <span class="badge badge-pending">Pending</span>
-              <?php endif; ?>
-            </td>
-            <td>
-              <?php if (empty($r['vote_id'])): ?>
-                <a href="vote.php?position_id=<?php echo (int)$r['position_id']; ?>" class="btn btn-primary btn-sm">
-                  Vote Now →
-                </a>
-              <?php else: ?>
-                <span class="text-muted" style="font-size:.85rem;">—</span>
-              <?php endif; ?>
-            </td>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    </div>
-
+      </ul>
+    </section>
   <?php endif; ?>
-
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/../../app/views/partials/footer.php'; ?>
