@@ -60,6 +60,19 @@ $layout    = 'auth';
 require_once __DIR__ . '/../app/views/partials/header.php';
 ?>
 
+<div class="auth-split">
+<aside class="auth-panel">
+  <span class="brand"><span class="brand-mark"><?php echo icon('logo'); ?></span><?php echo e(config()['app']['name']); ?></span>
+  <div>
+    <h2>One login for voters and administrators.</h2>
+    <p>Your ID decides where you land: the ballot, or the election dashboard.</p>
+  </div>
+  <ul class="auth-points">
+    <li><?php echo icon('check-circle'); ?>One vote per position, enforced by the database</li>
+    <li><?php echo icon('list'); ?>Review your whole ballot before you submit</li>
+    <li><?php echo icon('chart'); ?>Results open to everyone</li>
+  </ul>
+</aside>
 <div class="auth">
   <div class="card">
     <div class="card-body">
@@ -85,6 +98,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
     </div>
   </div>
   <p class="auth-foot">Lost your PIN? Ask the election administrator to reset it.</p>
+</div>
 </div>
 
 <?php require_once __DIR__ . '/../app/views/partials/footer.php'; ?>
