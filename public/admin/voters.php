@@ -59,6 +59,14 @@ function back_to_list(): string
     return '/admin/voters.php' . ($q ? '?' . http_build_query($q) : '');
 }
 
+/* The list view with one voter's edit form open. */
+function edit_url(int $voterId): string
+{
+    $q = array_intersect_key($_GET, array_flip(['q', 'status', 'page']));
+    $q['edit'] = $voterId;
+    return '/admin/voters.php?' . http_build_query($q) . '#edit';
+}
+
 if (is_post()) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         flash('error', 'Your session expired. Please try again.');
@@ -116,6 +124,39 @@ if (is_post()) {
 
     if (!$voter) {
         flash('error', 'That voter no longer exists.');
+    } elseif ($action === 'edit') {
+        // Votes and the session hang off the voter's id, so the ID and name can change freely.
+        $name = preg_replace('/\s+/', ' ', trim((string)($_POST['full_name'] ?? '')));
+        $uid  = normalize_voter_uid((string)($_POST['voter_uid'] ?? ''));
+        $error = '';
+        if ($name === '') {
+            $error = 'Enter the voter\'s full name.';
+        } elseif (mb_strlen($name) > 120) {
+            $error = 'The name is longer than 120 characters.';
+        } elseif (!valid_voter_uid($uid)) {
+            $error = "\"$uid\" doesn't look like a " . strtolower(voter_id_label()) . '.';
+        } elseif ($uid !== $voter['voter_uid'] && ($owner = identifier_owner($pdo, $uid))) {
+            $error = $owner === 'admin' ? "$uid is an admin username." : "$uid already belongs to another voter.";
+        }
+        if (!$error) {
+            try {
+                $pdo->prepare("UPDATE voters SET full_name = :n, voter_uid = :u WHERE id = :id")
+                    ->execute([':n' => $name, ':u' => $uid, ':id' => $voterId]);
+            } catch (PDOException $e) {
+                if ($e->getCode() !== '23000') throw $e;
+                $error = "$uid already belongs to another voter."; // taken between the check and the save
+            }
+        }
+        if ($error) {
+            $_SESSION['edit'] = ['id' => $voterId, 'name' => $name, 'uid' => $uid, 'error' => $error];
+            redirect(edit_url($voterId));
+        }
+        if ($uid !== $voter['voter_uid']) {
+            clear_login_failures($pdo, $voter['voter_uid']); // a lockout on the old, mistyped ID no longer matters
+            flash('success', "Saved. $name now logs in with $uid; their PIN hasn't changed.");
+        } else {
+            flash('success', "Saved changes to $name.");
+        }
     } elseif ($action === 'reset_pin') {
         $pin = generate_pin();
         $pdo->prepare("UPDATE voters SET password_hash = :h WHERE id = :id")
@@ -172,8 +213,21 @@ $counts = $pdo->query("SELECT COUNT(*) AS total, COALESCE(SUM(is_active = 1), 0)
 
 $newCredentials = $_SESSION['new_credentials'] ?? [];
 $import         = $_SESSION['import'] ?? null; // a pasted list that had errors
-unset($_SESSION['new_credentials'], $_SESSION['import']);
+$editState      = $_SESSION['edit'] ?? null;   // an edit that failed: what was typed, and why
+unset($_SESSION['new_credentials'], $_SESSION['import'], $_SESSION['edit']);
 $idLabel = voter_id_label();
+
+$editing = null;
+if ($editId = (int)($_GET['edit'] ?? 0)) {
+    $stmt = $pdo->prepare("SELECT id, voter_uid, full_name FROM voters WHERE id = :id");
+    $stmt->execute([':id' => $editId]);
+    $editing = $stmt->fetch() ?: null;
+    if ($editing && ($editState['id'] ?? 0) === $editId) {
+        $editing['full_name'] = $editState['name'];
+        $editing['voter_uid'] = $editState['uid'];
+        $editing['error']     = $editState['error'];
+    }
+}
 
 function page_url(int $page): string
 {
@@ -229,6 +283,41 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
         </table>
       </div>
     <?php endif; ?>
+  </section>
+<?php endif; ?>
+
+<?php if ($editing): ?>
+  <section class="card" id="edit" aria-labelledby="edit-title">
+    <div class="card-head">
+      <div>
+        <h2 id="edit-title">Edit voter</h2>
+        <div class="sub">Fix a typo in a name or <?php echo e(strtolower($idLabel)); ?>. Their PIN and any votes they've cast stay as they are.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <?php if (!empty($editing['error'])): ?>
+        <div class="alert alert-error" role="alert"><?php echo icon('alert'); ?><span><?php echo e($editing['error']); ?></span></div>
+      <?php endif; ?>
+      <form method="post" action="<?php echo e(back_to_list()); ?>">
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="action" value="edit">
+        <input type="hidden" name="voter_id" value="<?php echo (int)$editing['id']; ?>">
+        <div class="form-grid">
+          <div class="field">
+            <label class="label" for="edit-name">Full name</label>
+            <input class="input" id="edit-name" name="full_name" required maxlength="120" value="<?php echo e($editing['full_name']); ?>" <?php echo empty($editing['error']) ? 'autofocus' : ''; ?>>
+          </div>
+          <div class="field">
+            <label class="label" for="edit-uid"><?php echo e($idLabel); ?></label>
+            <input class="input mono" id="edit-uid" name="voter_uid" required autocapitalize="characters" spellcheck="false" value="<?php echo e($editing['voter_uid']); ?>" <?php echo !empty($editing['error']) ? 'autofocus' : ''; ?>>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit"><?php echo icon('check'); ?>Save changes</button>
+          <a class="btn btn-quiet" href="<?php echo e(back_to_list()); ?>">Cancel</a>
+        </div>
+      </form>
+    </div>
   </section>
 <?php endif; ?>
 
@@ -290,6 +379,7 @@ require_once __DIR__ . '/../../app/views/partials/header.php';
               <?php endif; ?>
               <td class="row-sub nowrap"><?php echo fmt_datetime($v['created_at'], 'd M Y'); ?></td>
               <td class="actions">
+                <a class="icon-btn" href="<?php echo e(edit_url((int)$v['id'])); ?>" aria-label="<?php echo e('Edit ' . $v['full_name']); ?>" title="Edit"><?php echo icon('edit'); ?></a>
                 <form class="inline-form" method="post" data-confirm="<?php echo e($v['full_name']); ?>'s current PIN stops working and a new one is shown once." data-confirm-title="Reset PIN?" data-confirm-ok="Reset PIN" data-confirm-tone="primary">
                   <?php echo csrf_field(); ?><input type="hidden" name="action" value="reset_pin"><input type="hidden" name="voter_id" value="<?php echo (int)$v['id']; ?>">
                   <button class="icon-btn" type="submit" aria-label="<?php echo e('Reset PIN for ' . $v['full_name']); ?>" title="Reset PIN"><?php echo icon('key'); ?></button>

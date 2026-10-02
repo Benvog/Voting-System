@@ -154,7 +154,7 @@ img, svg { display: block; }
 .input-icon { position: relative; }
 .input-icon .icon { position: absolute; left: 12px; top: 50%; translate: 0 -50%; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
 .input-icon .input { padding-left: 36px; }
-.form-grid { display: grid; gap: 0 16px; }
+.form-grid { display: grid; gap: 0 16px; align-items: start; }
 .form-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 .inline-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
 .inline-fields .field { margin: 0; flex: 1 1 180px; }
@@ -561,5 +561,5 @@ h2, h3 { font-weight: 600; letter-spacing: -.015em; }
 .error-list { margin: 6px 0 0; padding-left: 18px; }
 .error-list li { margin-top: 2px; }
 .card-body > .alert { margin-bottom: 16px; }
-#new-logins { scroll-margin-top: 76px; }
+#new-logins, #edit { scroll-margin-top: 76px; }
 .centered-actions { justify-content: center; margin-top: 16px; }
