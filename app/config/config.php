@@ -31,6 +31,10 @@ $config = [
   'demo' => [
     'read_only_admins' => [],
     'read_only_voters' => [],
+    // One-click "Try the demo" logins on the landing and login pages, e.g.
+    // ['label' => 'a voter', 'id' => 'CS/MK/0001/09/23', 'secret' => '246810'].
+    // Only IDs in the read-only lists above are ever shown.
+    'show_logins' => [],
   ],
 ];
 

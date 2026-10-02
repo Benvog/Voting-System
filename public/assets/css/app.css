@@ -444,6 +444,7 @@ img, svg { display: block; }
   .voter-id { display: inline-flex; }
   .user-name { display: inline; }
   .label-sm-hidden { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
+  .demo-logins { grid-template-columns: 1fr 1fr; }
 }
 @media (min-width: 900px) {
   .hero { grid-template-columns: 1.2fr 1fr; align-items: center; padding: 56px 0 16px; }
@@ -542,6 +543,18 @@ h2, h3 { font-weight: 600; letter-spacing: -.015em; }
 .auth-points li { display: flex; gap: 10px; align-items: center; }
 .auth-points .icon { padding: 6px; box-sizing: content-box; border-radius: 8px; background: rgba(255, 255, 255, .14); }
 .auth-split .auth-foot { padding: 0 28px 24px; margin: 0; text-align: left; }
+
+/* "Try the demo" logins (only on a public demo) */
+.demo-box { margin-top: 24px; padding: 16px 18px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface); }
+.demo-head { display: flex; gap: 10px; align-items: flex-start; }
+.demo-head .icon { flex: none; margin-top: 2px; color: var(--accent-ink); }
+.demo-head h2 { font-size: 15px; }
+.demo-head p { margin-top: 2px; font-size: 13px; color: var(--text-2); }
+.demo-logins { display: grid; gap: 12px; margin-top: 14px; }
+.demo-login { display: grid; gap: 4px; }
+.demo-creds { font-size: 12px; color: var(--text-2); text-align: center; overflow-wrap: anywhere; }
+.auth-split .demo-box { margin: 0 28px 20px; }
+.auth-split .demo-logins { grid-template-columns: 1fr; } /* the login card is too narrow for two */
 
 @media (min-width: 640px) {
   .hero { padding: 40px; }

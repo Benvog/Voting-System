@@ -12,5 +12,9 @@ return [
   // 'demo' => [
   //   'read_only_admins' => ['demo-admin'],
   //   'read_only_voters' => ['CS/MK/0001/09/23', 'CS/MK/0002/09/23'],
+  //   'show_logins' => [
+  //     ['label' => 'a voter',  'id' => 'CS/MK/0001/09/23', 'secret' => '246810'],
+  //     ['label' => 'an admin', 'id' => 'demo-admin',       'secret' => 'demo-admin-pass'],
+  //   ],
   // ],
 ];

@@ -97,6 +97,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
       </form>
     </div>
   </div>
+  <?php require __DIR__ . '/../app/views/partials/demo_logins.php'; ?>
   <p class="auth-foot">Lost your PIN? Ask the election administrator to reset it.</p>
 </div>
 </div>

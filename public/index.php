@@ -68,6 +68,8 @@ require_once __DIR__ . '/../app/views/partials/header.php';
   </div>
 </section>
 
+<?php if (!home_for_session()) require __DIR__ . '/../app/views/partials/demo_logins.php'; ?>
+
 <section class="features" aria-label="How it works">
   <div class="card feature">
     <?php echo icon('check-circle'); ?>
