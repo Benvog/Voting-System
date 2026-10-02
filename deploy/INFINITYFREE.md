@@ -61,10 +61,11 @@ Control Panel → **Online File Manager** → open `htdocs`.
 
 FTP works too (FileZilla, details under "FTP Details" in the client area).
 
-## 6. Turn on HTTPS
+## 6. HTTPS
 
-Client area → **Free SSL Certificates** → request one for `tally.xo.je` and
-install it. Logins only send the session cookie over HTTPS once it's on.
+Nothing to do: InfinityFree's free subdomains (like `tally.xo.je`) have SSL
+by default, and ordering a certificate for one is refused. A custom domain
+would need a certificate from the client area's **Free SSL Certificates**.
 
 ## 7. Check it
 
