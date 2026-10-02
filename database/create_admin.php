@@ -27,7 +27,8 @@ if (identifier_owner(db(), $username) === 'voter') {
 }
 
 echo "Password for $username (at least 10 characters): ";
-$password = trim((string)fgets(STDIN));
+// Strip a byte-order mark: PowerShell adds one when input is piped in.
+$password = trim((string)preg_replace('/^\x{FEFF}/u', '', (string)fgets(STDIN)));
 if (strlen($password) < 10) {
     fwrite(STDERR, "Password too short.\n");
     exit(1);

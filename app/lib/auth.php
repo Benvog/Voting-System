@@ -99,7 +99,8 @@ function login_is_throttled(PDO $pdo, string $identifier): bool
   $stmt->execute([':id' => $identifier, ':id2' => $identifier, ':ip' => client_ip(), ':ip2' => client_ip()]);
   $row = $stmt->fetch();
 
-  return (int)$row['by_id'] >= LOGIN_MAX_FAILURES || (int)$row['by_ip'] >= LOGIN_MAX_IP_FAILURES;
+  // An empty identifier (a demo account, see is_demo_identifier) is only limited per IP.
+  return ($identifier !== '' && (int)$row['by_id'] >= LOGIN_MAX_FAILURES) || (int)$row['by_ip'] >= LOGIN_MAX_IP_FAILURES;
 }
 
 function record_login_failure(PDO $pdo, string $identifier): void
@@ -153,6 +154,38 @@ function require_admin(): void
     header('Location: /login.php');
     exit;
   }
+  // Every admin write is a POST behind this check, so a demo admin is stopped here.
+  if (is_post() && is_read_only_admin(current_admin())) {
+    flash('info', 'This is a demo account, so changes aren\'t saved.');
+    redirect((string)($_SERVER['REQUEST_URI'] ?? '/admin/dashboard.php'));
+  }
+}
+
+/* ---------------- DEMO ACCOUNTS ---------------- */
+
+function is_read_only_admin(?array $admin): bool
+{
+  return $admin !== null && in_array($admin['username'], config()['demo']['read_only_admins'], true);
+}
+
+function is_read_only_voter(?array $voter): bool
+{
+  return $voter !== null && in_array($voter['voter_uid'], config()['demo']['read_only_voters'], true);
+}
+
+/* Is the signed-in account a demo one? */
+function is_read_only_session(): bool
+{
+  return is_read_only_admin(current_admin()) || is_read_only_voter(current_voter());
+}
+
+/* Is this login ID a demo account? Their passwords are public, so a lockout
+   would only let one visitor shut everyone else out. */
+function is_demo_identifier(string $id): bool
+{
+  $demo = config()['demo'];
+  return in_array(trim($id), $demo['read_only_admins'], true)
+      || in_array(normalize_voter_uid($id), $demo['read_only_voters'], true);
 }
 
 /* ---------------- VOTER AUTH ---------------- */

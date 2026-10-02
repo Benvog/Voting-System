@@ -25,6 +25,13 @@ $config = [
   'session' => [
     'name' => 'VOTINGSESSID',
   ],
+  // Accounts whose logins are published for a public demo. They can see every
+  // page, but nothing they submit is saved. Voter IDs are written as stored
+  // (upper-case, no spaces).
+  'demo' => [
+    'read_only_admins' => [],
+    'read_only_voters' => [],
+  ],
 ];
 
 $local = __DIR__ . '/config.local.php';

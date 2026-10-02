@@ -64,6 +64,21 @@ if (is_post()) {
         redirect('/voter/dashboard.php');
     }
 
+    $receipt = [
+        'election' => $election['name'],
+        'at'       => date('Y-m-d H:i:s'),
+        'votes'    => array_map(fn($pid, $cid) => [
+            'position'  => current(array_filter($positions, fn($p) => (int)$p['id'] === $pid))['name'],
+            'candidate' => $candidates[$pid][$cid]['name'],
+        ], array_keys($picks), $picks),
+    ];
+
+    // A demo voter sees the whole flow, but the ballot is never stored.
+    if (is_read_only_voter(current_voter())) {
+        $_SESSION['receipt'] = $receipt + ['demo' => true];
+        redirect('/voter/confirmed.php');
+    }
+
     // All of the ballot is recorded, or none of it.
     $insert = $pdo->prepare("INSERT INTO votes (election_id, position_id, voter_id, candidate_id) VALUES (:e, :p, :v, :c)");
     try {
@@ -79,14 +94,7 @@ if (is_post()) {
         redirect('/voter/dashboard.php');
     }
 
-    $_SESSION['receipt'] = [
-        'election' => $election['name'],
-        'at'       => date('Y-m-d H:i:s'),
-        'votes'    => array_map(fn($pid, $cid) => [
-            'position'  => current(array_filter($positions, fn($p) => (int)$p['id'] === $pid))['name'],
-            'candidate' => $candidates[$pid][$cid]['name'],
-        ], array_keys($picks), $picks),
-    ];
+    $_SESSION['receipt'] = $receipt;
     redirect('/voter/confirmed.php');
 }
 

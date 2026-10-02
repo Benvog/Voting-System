@@ -119,6 +119,14 @@ function nav_link(string $href, string $iconName, string $label, string $key, st
 <main class="page<?php echo $layout === 'auth' ? ' page-auth' : ''; ?>" id="main">
 <?php endif; ?>
 
+<?php if (in_array($layout, ['admin', 'voter'], true) && is_read_only_session()): ?>
+  <div class="flashes">
+    <div class="alert alert-info"><?php echo icon('info'); ?><span><?php echo $layout === 'admin'
+      ? 'Demo account: look around freely. Changes you make here aren\'t saved.'
+      : 'Demo account: go through the whole ballot. It won\'t be recorded.'; ?></span></div>
+  </div>
+<?php endif; ?>
+
 <?php if ($flashes): ?>
   <div class="flashes" role="status">
     <?php foreach ($flashes as $f): ?>

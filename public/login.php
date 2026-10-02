@@ -21,7 +21,7 @@ if (is_post()) {
         $error = 'Your session expired. Please try again.';
     } elseif ($identifier === '' || $secret === '') {
         $error = 'Enter your ' . strtolower(voter_id_label()) . ' and PIN.';
-    } elseif (login_is_throttled($pdo, $key = substr(normalize_voter_uid($identifier), 0, 50))) {
+    } elseif (login_is_throttled($pdo, $key = is_demo_identifier($identifier) ? '' : substr(normalize_voter_uid($identifier), 0, 50))) {
         $error = 'Too many failed attempts. Wait ' . LOGIN_WINDOW_MINUTES . ' minutes and try again.';
     } else {
         // Voters first, then admins. A voter ID and an admin username are never
