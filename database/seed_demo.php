@@ -6,6 +6,11 @@ declare(strict_types=1);
  * Every person in it is fictional.
  *
  *   php database/seed_demo.php
+ *   php database/seed_demo.php --closes-in-days=365   (for a hosted demo)
+ *
+ * The live election closes 30 hours after seeding by default, which suits
+ * screenshots. A hosted demo can't be re-seeded on a schedule, so give it
+ * a long window instead.
  *
  * It wipes every table first, so it refuses to run unless the configured
  * database name ends in "_demo".
@@ -14,6 +19,8 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') {
     exit("Run this from the command line.\n");
 }
+
+$closesInDays = (int)(getopt('', ['closes-in-days:'])['closes-in-days'] ?? 0);
 
 require_once __DIR__ . '/../app/lib/db.php';
 
@@ -125,7 +132,7 @@ function cast_votes(PDO $pdo, array $election, array $voters, float $share, int 
 $now = time();
 
 $live = election($pdo, 'Student Council Election 2026', 'active',
-    date('Y-m-d H:i:00', $now - 33 * 3600), date('Y-m-d H:00:00', $now + 30 * 3600), [
+    date('Y-m-d H:i:00', $now - 33 * 3600), date('Y-m-d H:00:00', $now + ($closesInDays > 0 ? $closesInDays * 86400 : 30 * 3600)), [
     'President' => [
         ['Achieng Odhiambo', 'Longer library hours during exams and a student feedback desk.', 38],
         ['Brian Kiprono', 'Cheaper cafeteria meal plans and better Wi-Fi in hostels.', 33],
