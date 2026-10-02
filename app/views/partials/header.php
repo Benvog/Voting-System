@@ -94,7 +94,7 @@ function nav_link(string $href, string $iconName, string $label, string $key, st
       <?php $voter = current_voter(); ?>
       <span class="user-chip voter-chip" title="<?php echo e(voter_id_label() . ': ' . ($voter['voter_uid'] ?? '')); ?>"><span class="avatar" aria-hidden="true"><?php echo e(initials($voter['full_name'] ?? '')); ?></span><span class="user-name"><?php echo e($voter['full_name'] ?? ''); ?></span></span>
       <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle dark mode"><?php echo icon('moon', 'when-light') . icon('sun', 'when-dark'); ?></button>
-      <a class="btn btn-ghost btn-sm" href="/logout.php"><?php echo icon('logout'); ?>Log out</a>
+      <a class="btn btn-ghost btn-sm" href="/logout.php"><?php echo icon('logout'); ?><span class="label-sm-hidden">Log out</span></a>
     </div>
   </div>
 </header>

@@ -82,7 +82,7 @@ require_once __DIR__ . '/../app/views/partials/header.php';
   <div class="card feature">
     <?php echo icon('chart'); ?>
     <h3>Open results</h3>
-    <p>Anyone can follow turnout and per-position counts while voting is open and after it closes.</p>
+    <p>Anyone can follow turnout while voting is open. Candidate counts are published the moment it closes.</p>
   </div>
 </section>
 
